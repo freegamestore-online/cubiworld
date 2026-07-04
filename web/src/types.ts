@@ -10,25 +10,42 @@ export interface BlockSkin {
   hat: "none" | "bow" | "crown" | "flower" | "star";
 }
 
-// A single step tile (part of a staircase obstacle)
-export interface StepTile {
+/** A single landable platform tile */
+export interface PlatformTile {
   x: number;
-  y: number;
+  y: number;       // top surface y
   width: number;
   height: number;
 }
 
-export interface Obstacle {
-  x: number;        // leftmost x of the whole obstacle group
-  y: number;        // top y of the first/tallest part
-  width: number;    // bounding width
-  height: number;   // bounding height
-  type: "spike" | "spike_group" | "steps";
+/** A spike attached under a step or below a platform */
+export interface UnderSpike {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   color: string;
-  // For spike_group: how many spikes side-by-side
+  pointDown: boolean; // true = hangs from step, false = sits on ground under platform
+}
+
+export interface Obstacle {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /**
+   * spike       – single triangle spike on the ground
+   * spike_group – 2–3 spikes side-by-side on the ground
+   * platform    – raised flat platform to jump onto (spikes below)
+   * staircase   – separated ascending steps with spikes below each
+   */
+  type: "spike" | "spike_group" | "platform" | "staircase";
+  color: string;
   spikeCount?: number;
-  // For steps: array of individual step tiles
-  steps?: StepTile[];
+  /** landable tiles */
+  platforms?: PlatformTile[];
+  /** lethal spikes associated with this obstacle */
+  underSpikes?: UnderSpike[];
 }
 
 export interface Particle {
@@ -43,11 +60,10 @@ export interface Particle {
 }
 
 export interface GameState {
-  phase: "menu" | "playing" | "dead" | "editor";
+  phase: "menu" | "playing" | "dead";
   playerY: number;
   playerVY: number;
   isGrounded: boolean;
-  groundedOnStep: boolean;
   score: number;
   distance: number;
   speed: number;
@@ -55,7 +71,6 @@ export interface GameState {
   particles: Particle[];
   groundTiles: { x: number; color: string }[];
   bgStars: { x: number; y: number; size: number; twinkle: number }[];
-  jumpPressed: boolean;
   jumpConsumed: boolean;
   deathAnimTimer: number;
   flashTimer: number;
