@@ -18,14 +18,16 @@ export interface PlatformTile {
   height: number;
 }
 
-/** A spike attached under a step or below a platform */
-export interface UnderSpike {
+/**
+ * A spike on the FLOOR (always pointing up).
+ * Used for ground spikes under platforms and under staircase steps.
+ */
+export interface FloorSpike {
   x: number;
-  y: number;
+  y: number;       // top of spike (tip)
   width: number;
   height: number;
   color: string;
-  pointDown: boolean; // true = hangs from step, false = sits on ground under platform
 }
 
 export interface Obstacle {
@@ -36,16 +38,16 @@ export interface Obstacle {
   /**
    * spike       – single triangle spike on the ground
    * spike_group – 2–3 spikes side-by-side on the ground
-   * platform    – raised flat platform to jump onto (spikes below)
-   * staircase   – separated ascending steps with spikes below each
+   * platform    – raised flat platform to jump onto (floor spikes below)
+   * staircase   – separated ascending steps with floor spikes below each
    */
   type: "spike" | "spike_group" | "platform" | "staircase";
   color: string;
   spikeCount?: number;
   /** landable tiles */
   platforms?: PlatformTile[];
-  /** lethal spikes associated with this obstacle */
-  underSpikes?: UnderSpike[];
+  /** floor spikes (always on the ground, pointing up) */
+  floorSpikes?: FloorSpike[];
 }
 
 export interface Particle {
@@ -65,15 +67,16 @@ export interface GameState {
   playerVY: number;
   isGrounded: boolean;
   score: number;
+  level: number;
   distance: number;
   speed: number;
   obstacles: Obstacle[];
   particles: Particle[];
   groundTiles: { x: number; color: string }[];
   bgStars: { x: number; y: number; size: number; twinkle: number }[];
-  jumpConsumed: boolean;
   deathAnimTimer: number;
   flashTimer: number;
+  levelFlashTimer: number;   // flash when levelling up
 }
 
 export const DEFAULT_SKIN: BlockSkin = {

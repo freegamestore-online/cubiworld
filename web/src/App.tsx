@@ -4,8 +4,9 @@ import { useGameLoop } from "./hooks/useGameLoop";
 import { useHighScore } from "./hooks/useHighScore";
 import { drawCuteBlock } from "./lib/drawBlock";
 import { drawText } from "./lib/canvas";
+import { CozyMusic } from "./lib/music";
 import BlockEditor from "./components/BlockEditor";
-import type { BlockSkin, GameState, Obstacle, PlatformTile, UnderSpike } from "./types";
+import type { BlockSkin, FloorSpike, GameState, Obstacle, PlatformTile } from "./types";
 import { DEFAULT_SKIN } from "./types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -13,9 +14,11 @@ const GROUND_Y_RATIO = 0.78;
 const BS = 48;
 const GRAVITY = 2000;
 const JUMP_VEL = -740;
-const INITIAL_SPEED = 270;
+const INITIAL_SPEED = 240;      // starting speed (px/s)
+const SPEED_PER_LEVEL = 38;     // extra px/s per level
+const SCORE_PER_LEVEL = 10;     // score points per level
 const PLAYER_X = 80;
-const PLATFORM_H = 14; // thickness of platform/step surface
+const PLATFORM_H = 14;          // step/platform surface thickness
 
 const CUTE_COLORS  = ["#ffb3d9","#b3d9ff","#b3ffda","#ffe0b3","#e0b3ff","#fffdb3"];
 const STEP_COLORS  = ["#b3d9ff","#b3ffda","#ffe0b3","#e0b3ff","#c8f5c8","#ffd6ff"];
@@ -33,6 +36,18 @@ function lighten(hex: string, amt: number): string {
   return `#${r.toString(16).padStart(2,"0")}${g.toString(16).padStart(2,"0")}${b.toString(16).padStart(2,"0")}`;
 }
 
+/** Speed for a given 0-based level index (capped at level 20) */
+function speedForLevel(level: number): number {
+  return INITIAL_SPEED + Math.min(level, 20) * SPEED_PER_LEVEL;
+}
+
+/** Obstacle gap timing — tightens as level increases */
+function gapForLevel(level: number): [number, number] {
+  const lo = Math.max(0.5,  1.1 - level * 0.04);
+  const hi = Math.max(1.05, 2.0 - level * 0.06);
+  return [lo, hi];
+}
+
 function loadSkin(): BlockSkin {
   try { const r = localStorage.getItem("cubiworld_skin"); if (r) return JSON.parse(r) as BlockSkin; }
   catch { /* ignore */ }
@@ -41,7 +56,10 @@ function loadSkin(): BlockSkin {
 function saveSkin(s: BlockSkin) { localStorage.setItem("cubiworld_skin", JSON.stringify(s)); }
 
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number, r: number,
+) {
   const cr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + cr, y); ctx.lineTo(x + w - cr, y);
@@ -53,7 +71,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 
 // ─── Obstacle factories ───────────────────────────────────────────────────────
 
-/** Ground-level spike group (1–3 spikes pointing up) */
+/** 1–3 ground spikes pointing up */
 function makeSpikeGroup(startX: number, groundY: number): Obstacle {
   const count = Math.random() < 0.4 ? 1 : Math.random() < 0.6 ? 2 : 3;
   const sw = BS * 0.72;
@@ -68,9 +86,8 @@ function makeSpikeGroup(startX: number, groundY: number): Obstacle {
 }
 
 /**
- * Platform: a wide raised flat surface.
- * Player must jump UP onto it, then jump off the far end.
- * Spikes on the ground below — can't just run under it.
+ * Raised platform the player must jump UP onto.
+ * Floor spikes sit on the ground directly below it — can't just run under.
  */
 function makePlatform(startX: number, groundY: number): Obstacle {
   const color = pick(PLAT_COLORS);
@@ -81,19 +98,18 @@ function makePlatform(startX: number, groundY: number): Obstacle {
 
   const platforms: PlatformTile[] = [{ x: startX, y: platY, width: platW, height: platH }];
 
-  // Spikes on the ground underneath
-  const underSpikes: UnderSpike[] = [];
-  const spikeW = BS * 0.7;
-  const spikeH = BS * 0.72;
+  // Floor spikes on the ground beneath the platform
+  const floorSpikes: FloorSpike[] = [];
+  const spikeW = BS * 0.68;
+  const spikeH = BS * 0.8;
   const spikeCount = Math.ceil(platW / spikeW);
   for (let i = 0; i < spikeCount; i++) {
-    underSpikes.push({
+    floorSpikes.push({
       x: startX + i * spikeW,
-      y: groundY - spikeH,
+      y: groundY - spikeH,   // tip at top, base sits on groundY
       width: spikeW,
       height: spikeH,
       color: pick(SPIKE_COLORS),
-      pointDown: false,
     });
   }
 
@@ -101,48 +117,45 @@ function makePlatform(startX: number, groundY: number): Obstacle {
     x: startX, y: platY,
     width: platW, height: groundY - platY,
     type: "platform",
-    color, platforms, underSpikes,
+    color, platforms, floorSpikes,
   };
 }
 
 /**
  * Staircase: 3–4 separated ascending steps.
- * Each step is a narrow platform with a GAP between (must jump each one individually).
- * A spike hangs DOWN from below each step — fall between them = death.
- * Steps get progressively higher left→right.
+ * Each step has a GAP (must jump each one individually).
+ * Floor spikes sit ON THE GROUND below each step — not attached, just on the floor.
  */
 function makeStaircase(startX: number, groundY: number): Obstacle {
   const stepCount = Math.random() < 0.5 ? 3 : 4;
   const color = pick(STEP_COLORS);
 
-  const stepW = BS * 1.1;       // width of each step surface
-  const gap = BS * 0.9;         // gap between steps (must jump across)
-  const risePerStep = BS * 0.7; // each step is this much higher than the previous
+  const stepW = BS * 1.1;
+  const gap   = BS * 0.9;
+  const rise  = BS * 0.7;
   const platH = PLATFORM_H;
 
   const platforms: PlatformTile[] = [];
-  const underSpikes: UnderSpike[] = [];
+  const floorSpikes: FloorSpike[] = [];
 
   let totalW = 0;
-  let minY = groundY;
+  let minY   = groundY;
 
   for (let i = 0; i < stepCount; i++) {
     const stepX = startX + i * (stepW + gap);
-    const stepY = groundY - BS * 1.15 - risePerStep * i - platH;
+    const stepY = groundY - BS * 1.15 - rise * i - platH;
 
     platforms.push({ x: stepX, y: stepY, width: stepW, height: platH });
 
-    // Spike pointing DOWN from the underside of this step
-    // (taller on higher steps = more dangerous to fall into)
-    const spikeH = BS * 0.65 + risePerStep * i * 0.6;
-    const spikeW = stepW * 0.7;
-    underSpikes.push({
+    // Floor spike ON THE GROUND below this step — not hanging, just sitting there
+    const spikeW = stepW * 0.72;
+    const spikeH = BS * 0.72 + rise * i * 0.3; // taller on higher steps
+    floorSpikes.push({
       x: stepX + (stepW - spikeW) / 2,
-      y: stepY + platH,          // hangs from bottom of step surface
+      y: groundY - spikeH,   // base on the ground, tip pointing up
       width: spikeW,
       height: spikeH,
       color: pick(SPIKE_COLORS),
-      pointDown: true,
     });
 
     totalW = stepX + stepW - startX;
@@ -153,70 +166,59 @@ function makeStaircase(startX: number, groundY: number): Obstacle {
     x: startX, y: minY,
     width: totalW, height: groundY - minY,
     type: "staircase",
-    color, platforms, underSpikes,
+    color, platforms, floorSpikes,
     spikeCount: stepCount,
   };
 }
 
 // ─── Drawing helpers ──────────────────────────────────────────────────────────
 
-/** Draw a spike triangle. pointDown = hangs from a step; !pointDown = sits on ground */
-function drawSpikeTriangle(
+/** Floor spike — triangle pointing UP, sitting on the ground */
+function drawFloorSpike(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
   color: string,
-  pointDown: boolean,
 ) {
   ctx.save();
-  // Shadow
-  ctx.globalAlpha = 0.15;
-  ctx.fillStyle = "#000";
+  // Drop shadow
+  ctx.globalAlpha = 0.15; ctx.fillStyle = "#000";
   ctx.beginPath();
-  if (pointDown) {
-    ctx.moveTo(x + 3, y + 3); ctx.lineTo(x + w + 3, y + 3); ctx.lineTo(x + w / 2 + 3, y + h + 3);
-  } else {
-    ctx.moveTo(x + w / 2 + 3, y + 3); ctx.lineTo(x + w + 3, y + h + 3); ctx.lineTo(x + 3, y + h + 3);
-  }
+  ctx.moveTo(x + w / 2 + 3, y + 3);
+  ctx.lineTo(x + w + 3, y + h + 3);
+  ctx.lineTo(x + 3, y + h + 3);
   ctx.closePath(); ctx.fill();
   ctx.globalAlpha = 1;
 
-  // Body gradient
+  // Body
   const grad = ctx.createLinearGradient(x, y, x + w, y + h);
-  grad.addColorStop(0, lighten(color, 0.3)); grad.addColorStop(1, color);
+  grad.addColorStop(0, lighten(color, 0.35));
+  grad.addColorStop(1, color);
   ctx.fillStyle = grad;
-  ctx.shadowColor = color; ctx.shadowBlur = 10;
+  ctx.shadowColor = color; ctx.shadowBlur = 8;
   ctx.beginPath();
-  if (pointDown) {
-    ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w / 2, y + h);
-  } else {
-    ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h);
-  }
+  ctx.moveTo(x + w / 2, y);   // tip (pointing up)
+  ctx.lineTo(x + w, y + h);   // bottom-right
+  ctx.lineTo(x, y + h);       // bottom-left
   ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0;
 
   // Outline
-  ctx.shadowBlur = 0;
   ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 1.5;
   ctx.beginPath();
-  if (pointDown) {
-    ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w / 2, y + h);
-  } else {
-    ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h);
-  }
+  ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h);
   ctx.closePath(); ctx.stroke();
 
   // Highlight streak
-  ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 1;
   ctx.beginPath();
-  if (pointDown) {
-    ctx.moveTo(x + w * 0.35, y + h * 0.08); ctx.lineTo(x + w * 0.48, y + h * 0.72);
-  } else {
-    ctx.moveTo(x + w / 2, y + h * 0.08); ctx.lineTo(x + w * 0.62, y + h * 0.72);
-  }
+  ctx.moveTo(x + w / 2, y + h * 0.08);
+  ctx.lineTo(x + w * 0.62, y + h * 0.72);
   ctx.stroke();
+
   ctx.restore();
 }
 
-/** Draw a flat platform/step surface (no face) */
+/** Flat platform/step surface (no face) */
 function drawPlatformTile(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
@@ -224,12 +226,10 @@ function drawPlatformTile(
 ) {
   const r = Math.min(6, h / 2);
   ctx.save();
-  // Shadow
   ctx.globalAlpha = 0.2; ctx.fillStyle = "#000";
   roundRect(ctx, x + 3, y + 3, w, h, r); ctx.fill();
   ctx.globalAlpha = 1;
 
-  // Body
   const grad = ctx.createLinearGradient(x, y, x, y + h);
   grad.addColorStop(0, lighten(color, 0.28)); grad.addColorStop(1, color);
   ctx.fillStyle = grad;
@@ -237,11 +237,9 @@ function drawPlatformTile(
   roundRect(ctx, x, y, w, h, r); ctx.fill();
   ctx.shadowBlur = 0;
 
-  // Top shine
   ctx.fillStyle = "rgba(255,255,255,0.22)";
   roundRect(ctx, x + 3, y + 2, w - 6, Math.min(5, h * 0.4), r * 0.5); ctx.fill();
 
-  // Outline
   ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 1.5;
   roundRect(ctx, x, y, w, h, r); ctx.stroke();
   ctx.restore();
@@ -254,29 +252,27 @@ function drawObstacle(ctx: CanvasRenderingContext2D, obs: Obstacle, groundY: num
     const count = obs.spikeCount ?? 1;
     const sw = obs.width / count;
     for (let i = 0; i < count; i++) {
-      drawSpikeTriangle(ctx, obs.x + i * sw, obs.y, sw, obs.height, obs.color, false);
+      drawFloorSpike(ctx, obs.x + i * sw, obs.y, sw, obs.height, obs.color);
     }
-    // Base glow line
     ctx.strokeStyle = obs.color; ctx.lineWidth = 2;
     ctx.shadowColor = obs.color; ctx.shadowBlur = 6;
     ctx.beginPath(); ctx.moveTo(obs.x, groundY); ctx.lineTo(obs.x + obs.width, groundY); ctx.stroke();
 
   } else if (obs.type === "platform") {
-    // Ground spikes below (pointing up)
-    if (obs.underSpikes) {
-      for (const sp of obs.underSpikes) {
-        drawSpikeTriangle(ctx, sp.x, sp.y, sp.width, sp.height, sp.color, false);
+    // Floor spikes on the ground under the platform
+    if (obs.floorSpikes) {
+      for (const sp of obs.floorSpikes) {
+        drawFloorSpike(ctx, sp.x, sp.y, sp.width, sp.height, sp.color);
       }
     }
-    // Platform surface + faint pillars
+    // Platform surface + faint pillar
     if (obs.platforms) {
       for (const p of obs.platforms) {
-        // Faint pillar
         const pillarTop = p.y + p.height;
-        const pillarH = groundY - pillarTop;
+        const pillarH   = groundY - pillarTop;
         if (pillarH > 0) {
           ctx.save();
-          ctx.globalAlpha = 0.15; ctx.fillStyle = obs.color;
+          ctx.globalAlpha = 0.14; ctx.fillStyle = obs.color;
           roundRect(ctx, p.x + p.width * 0.15, pillarTop, p.width * 0.7, pillarH, 4);
           ctx.fill(); ctx.globalAlpha = 1;
           ctx.restore();
@@ -286,23 +282,22 @@ function drawObstacle(ctx: CanvasRenderingContext2D, obs: Obstacle, groundY: num
     }
 
   } else if (obs.type === "staircase") {
-    // Down-pointing spikes below each step
-    if (obs.underSpikes) {
-      for (const sp of obs.underSpikes) {
-        drawSpikeTriangle(ctx, sp.x, sp.y, sp.width, sp.height, sp.color, true);
+    // Floor spikes on the ground below each step (not attached — just on the floor)
+    if (obs.floorSpikes) {
+      for (const sp of obs.floorSpikes) {
+        drawFloorSpike(ctx, sp.x, sp.y, sp.width, sp.height, sp.color);
       }
     }
-    // Each step surface, ascending
+    // Each step surface (ascending, numbered)
     if (obs.platforms) {
       for (let i = 0; i < obs.platforms.length; i++) {
         const p = obs.platforms[i];
         if (!p) continue;
         const c = lighten(obs.color, i * 0.07);
         drawPlatformTile(ctx, p.x, p.y, p.width, p.height, c);
-        // Step number
         ctx.save();
         ctx.globalAlpha = 0.6; ctx.fillStyle = "#fff";
-        ctx.font = `bold 11px Manrope,sans-serif`;
+        ctx.font = "bold 11px Manrope,sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(`${i + 1}`, p.x + p.width / 2, p.y + p.height - 2);
         ctx.restore();
@@ -313,7 +308,7 @@ function drawObstacle(ctx: CanvasRenderingContext2D, obs: Obstacle, groundY: num
   ctx.restore();
 }
 
-// ─── Scene & Menu draw ────────────────────────────────────────────────────────
+// ─── Scene draw ───────────────────────────────────────────────────────────────
 function drawScene(
   ctx: CanvasRenderingContext2D,
   w: number, h: number, groundY: number,
@@ -352,39 +347,70 @@ function drawScene(
   }
   ctx.globalAlpha = 1;
 
-  // Only the player has a face
   if (state.phase === "playing" || state.deathAnimTimer < 0.45) {
     drawCuteBlock(ctx, PLAYER_X, state.playerY, skin, BS, rotation);
   }
 
+  // Level-up flash
+  if (state.levelFlashTimer > 0) {
+    ctx.globalAlpha = state.levelFlashTimer * 0.32;
+    ctx.fillStyle = "#ffe0b3"; ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = 1;
+  }
+
+  // HUD
   if (state.phase === "playing") {
     drawText(ctx, `✦ ${state.score}`, w / 2, 26, {
       font: "bold 20px Manrope, sans-serif",
       color: "#ffe0f5", shadow: "#ff6eb4", shadowBlur: 12, align: "center",
     });
+    // Level badge
+    ctx.save();
+    ctx.fillStyle = "rgba(255,110,180,0.22)";
+    roundRect(ctx, w - 72, 7, 62, 26, 8); ctx.fill();
+    ctx.restore();
+    drawText(ctx, `Lv ${state.level}`, w - 41, 25, {
+      font: "bold 14px Manrope, sans-serif",
+      color: "#ffb3d9", align: "center",
+    });
+    // Level-up text
+    if (state.levelFlashTimer > 0.5) {
+      ctx.globalAlpha = Math.min(1, (state.levelFlashTimer - 0.5) * 4);
+      drawText(ctx, `⬆ LEVEL ${state.level}!`, w / 2, h * 0.2, {
+        font: `bold ${Math.min(w * 0.08, 34)}px Fraunces, serif`,
+        color: "#ffe0b3", shadow: "#ff9944", shadowBlur: 18, align: "center",
+      });
+      ctx.globalAlpha = 1;
+    }
   }
 
+  // Death screen
   if (state.phase === "dead" && state.deathAnimTimer > 0.3) {
     ctx.fillStyle = "rgba(20,5,40,0.74)"; ctx.fillRect(0, 0, w, h);
-    drawText(ctx, "💔 oh no!", w / 2, h * 0.32, {
+    drawText(ctx, "💔 oh no!", w / 2, h * 0.30, {
       font: `bold ${Math.min(w * 0.1, 44)}px Fraunces, serif`,
       color: "#ff9ec4", shadow: "#ff6eb4", shadowBlur: 20, align: "center",
     });
-    drawText(ctx, `Score: ${state.score}`, w / 2, h * 0.46, {
+    drawText(ctx, `Score: ${state.score}`, w / 2, h * 0.43, {
       font: `bold ${Math.min(w * 0.065, 28)}px Manrope, sans-serif`,
       color: "#fff", align: "center",
     });
-    drawText(ctx, `Best: ${Math.max(state.score, highScore)}`, w / 2, h * 0.54, {
+    drawText(ctx, `Level: ${state.level}`, w / 2, h * 0.51, {
+      font: `${Math.min(w * 0.05, 20)}px Manrope, sans-serif`,
+      color: "#ffe0b3", align: "center",
+    });
+    drawText(ctx, `Best: ${Math.max(state.score, highScore)}`, w / 2, h * 0.59, {
       font: `${Math.min(w * 0.05, 20)}px Manrope, sans-serif`,
       color: "#ffb3d9", align: "center",
     });
-    drawText(ctx, "Tap / Space to try again", w / 2, h * 0.66, {
+    drawText(ctx, "Tap / Space to try again", w / 2, h * 0.71, {
       font: `${Math.min(w * 0.04, 17)}px Manrope, sans-serif`,
       color: "#cc88bb", align: "center",
     });
   }
 }
 
+// ─── Menu draw ────────────────────────────────────────────────────────────────
 function drawMenu(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   skin: BlockSkin, rotRef: { current: number }, highScore: number,
@@ -435,23 +461,44 @@ function drawMenu(
 
 // ─── App component ────────────────────────────────────────────────────────────
 export default function App() {
-  const canvasRef    = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const stateRef     = useRef<GameState | null>(null);
-  const skinRef      = useRef<BlockSkin>(loadSkin());
-  const rotRef       = useRef(0);
-  const nextObsTimer = useRef(rnd(1.2, 2.2));
-  const timeSinceLast= useRef(0);
-  const inputDown    = useRef(false);
-  const inputWas     = useRef(false);
-  const audioCtx     = useRef<AudioContext | null>(null);
-  const sizeRef      = useRef({ w: 600, h: 400 });
+  const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const stateRef      = useRef<GameState | null>(null);
+  const skinRef       = useRef<BlockSkin>(loadSkin());
+  const rotRef        = useRef(0);
+  const nextObsTimer  = useRef(rnd(1.2, 2.2));
+  const timeSinceLast = useRef(0);
+  const inputDown     = useRef(false);
+  const inputWas      = useRef(false);
+  const sizeRef       = useRef({ w: 600, h: 400 });
+  const musicRef      = useRef<CozyMusic | null>(null);
+  const mutedRef      = useRef(true);   // muted by default
+  const audioCtx      = useRef<AudioContext | null>(null);
 
   const [skin, setSkin]              = useState<BlockSkin>(loadSkin());
   const [showEditor, setShowEditor]  = useState(false);
   const [phase, setPhase]            = useState<GameState["phase"]>("menu");
   const [score, setScore]            = useState(0);
+  const [muted, setMuted]            = useState(true);
   const [highScore, updateHighScore] = useHighScore("cubiworld_highscore");
+
+  // ── Music setup ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    musicRef.current = new CozyMusic();
+    return () => { musicRef.current?.stop(); };
+  }, []);
+
+  // ── Toggle mute (stable ref so it's safe in event listeners) ───────────────
+  const toggleMuteRef = useRef(() => {
+    const m = !mutedRef.current;
+    mutedRef.current = m;
+    setMuted(m);
+    if (!m) {
+      musicRef.current?.start();
+    } else {
+      musicRef.current?.stop();
+    }
+  });
 
   // ── Resize ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -470,6 +517,7 @@ export default function App() {
   useEffect(() => {
     const dn = (e: KeyboardEvent) => {
       if ([" ","ArrowUp","w","W"].includes(e.key)) { e.preventDefault(); inputDown.current = true; }
+      if (e.key === "m" || e.key === "M") toggleMuteRef.current();
     };
     const up = (e: KeyboardEvent) => {
       if ([" ","ArrowUp","w","W"].includes(e.key)) { inputDown.current = false; inputWas.current = false; }
@@ -479,8 +527,9 @@ export default function App() {
     return () => { window.removeEventListener("keydown", dn); window.removeEventListener("keyup", up); };
   }, []);
 
-  // ── Audio ───────────────────────────────────────────────────────────────────
+  // ── Audio SFX ───────────────────────────────────────────────────────────────
   function beep(freq: number, dur: number, type: OscillatorType = "sine") {
+    if (mutedRef.current) return;
     try {
       if (!audioCtx.current) audioCtx.current = new AudioContext();
       const ac = audioCtx.current;
@@ -513,7 +562,7 @@ export default function App() {
     stateRef.current = {
       phase: "playing",
       playerY: groundY - BS, playerVY: 0, isGrounded: true,
-      score: 0, distance: 0, speed: INITIAL_SPEED,
+      score: 0, level: 1, distance: 0, speed: INITIAL_SPEED,
       obstacles: [], particles: [],
       groundTiles: Array.from({ length: Math.ceil(w / BS) + 4 }, (_, i) => ({
         x: i * BS, color: CUTE_COLORS[i % CUTE_COLORS.length] ?? "#ffb3d9",
@@ -522,14 +571,14 @@ export default function App() {
         x: rnd(0, w), y: rnd(0, groundY * 0.85),
         size: rnd(1, 3.5), twinkle: rnd(0, Math.PI * 2),
       })),
-      jumpConsumed: false,
-      deathAnimTimer: 0, flashTimer: 0,
+      deathAnimTimer: 0, flashTimer: 0, levelFlashTimer: 0,
     };
     rotRef.current = 0;
     nextObsTimer.current = rnd(1.2, 2.2);
     timeSinceLast.current = 0;
     inputWas.current = false;
     setScore(0); setPhase("playing");
+    if (!mutedRef.current) musicRef.current?.start();
   }, []);
 
   // ── Game loop ───────────────────────────────────────────────────────────────
@@ -540,6 +589,7 @@ export default function App() {
     const groundY = h * GROUND_Y_RATIO;
     const state = stateRef.current;
 
+    // Menu
     if (phase === "menu") {
       drawMenu(ctx, w, h, skinRef.current, rotRef, highScore);
       rotRef.current += dt * 1.4;
@@ -547,6 +597,7 @@ export default function App() {
     }
     if (!state) return;
 
+    // Dead
     if (state.phase === "dead") {
       state.deathAnimTimer += dt;
       if (state.flashTimer > 0) state.flashTimer = Math.max(0, state.flashTimer - dt * 4);
@@ -573,32 +624,47 @@ export default function App() {
     state.playerVY += GRAVITY * dt;
     state.playerY  += state.playerVY * dt;
 
+    // ── Level-up check ──
+    const newLevel = Math.floor(state.score / SCORE_PER_LEVEL) + 1;
+    if (newLevel > state.level) {
+      state.level = newLevel;
+      state.levelFlashTimer = 1.2;
+      beep(660, 0.06); beep(880, 0.12);
+      burst(state, w / 2, h * 0.35, 18, ["#ffe0b3","#ffb3d9","#b3d9ff","#b3ffda"]);
+    }
+    if (state.levelFlashTimer > 0) state.levelFlashTimer = Math.max(0, state.levelFlashTimer - dt);
+
+    // Speed is purely level-driven
+    state.speed = speedForLevel(state.level - 1);
+
     // ── Spawn obstacles ──
     timeSinceLast.current += dt;
+    const [gapLo, gapHi] = gapForLevel(state.level - 1);
     if (timeSinceLast.current >= nextObsTimer.current) {
       const roll = Math.random();
-      if (state.score > 5 && roll < 0.30) {
+      if (state.level >= 3 && roll < 0.30) {
         state.obstacles.push(makeStaircase(w + 20, groundY));
-      } else if (state.score > 2 && roll < 0.58) {
+      } else if (state.level >= 2 && roll < 0.58) {
         state.obstacles.push(makePlatform(w + 20, groundY));
       } else {
         state.obstacles.push(makeSpikeGroup(w + 20, groundY));
       }
       timeSinceLast.current = 0;
-      nextObsTimer.current = rnd(1.05, 2.0);
+      nextObsTimer.current = rnd(gapLo, gapHi);
     }
 
     // ── Scroll ──
     for (const obs of state.obstacles) {
       obs.x -= state.speed * dt;
-      if (obs.platforms)   for (const p of obs.platforms)    p.x -= state.speed * dt;
-      if (obs.underSpikes) for (const s of obs.underSpikes)  s.x -= state.speed * dt;
+      if (obs.platforms)   for (const p of obs.platforms)   p.x -= state.speed * dt;
+      if (obs.floorSpikes) for (const s of obs.floorSpikes) s.x -= state.speed * dt;
     }
     state.obstacles = state.obstacles.filter(o => o.x + o.width > -80);
 
     // Ground tiles
     for (const t of state.groundTiles) t.x -= state.speed * dt;
-    const ft = state.groundTiles[0]; const lt = state.groundTiles[state.groundTiles.length - 1];
+    const ft = state.groundTiles[0];
+    const lt = state.groundTiles[state.groundTiles.length - 1];
     if (ft && ft.x < -BS) {
       state.groundTiles.push({ x: (lt?.x ?? 0) + BS, color: pick(CUTE_COLORS) });
       state.groundTiles.shift();
@@ -619,13 +685,15 @@ export default function App() {
     // Score
     state.distance += state.speed * dt;
     const ns = Math.floor(state.distance / 100);
-    if (ns > state.score && ns % 10 === 0) { beep(660, 0.08); burst(state, w / 2, h * 0.3, 10, CUTE_COLORS); }
+    if (ns > state.score && ns % 5 === 0) {
+      beep(660, 0.08);
+      burst(state, w / 2, h * 0.3, 8, CUTE_COLORS);
+    }
     state.score = ns;
-    state.speed = INITIAL_SPEED + state.score * 0.6;
 
     // ── Collision ──
-    const px = PLAYER_X;
-    const py = state.playerY;
+    const px  = PLAYER_X;
+    const py  = state.playerY;
     const pad = 5;
     let killed = false;
     let landed = false;
@@ -646,9 +714,9 @@ export default function App() {
         }
 
       } else if (obs.type === "platform" || obs.type === "staircase") {
-        // Under-spikes = instant death
-        if (obs.underSpikes) {
-          for (const sp of obs.underSpikes) {
+        // Floor spikes = instant death
+        if (obs.floorSpikes) {
+          for (const sp of obs.floorSpikes) {
             const hit =
               px + pad < sp.x + sp.width - pad && px + BS - pad > sp.x + pad &&
               py + pad < sp.y + sp.height       && py + BS - pad > sp.y;
@@ -667,10 +735,8 @@ export default function App() {
             const currBottom = state.playerY + BS;
 
             if (prevBottom <= p.y + 6 && currBottom >= p.y && state.playerVY >= 0) {
-              // Land on top
               if (!landed || p.y - BS < landY) { landed = true; landY = p.y - BS; }
             } else {
-              // Side collision
               const inV = py + BS - pad > p.y + pad && py + pad < p.y + p.height - pad;
               if (inV) { killed = true; break; }
             }
@@ -687,6 +753,7 @@ export default function App() {
       beep(200, 0.35, "sawtooth");
       burst(state, px + BS / 2, py + BS / 2, 22,
         [skinRef.current.bodyColor, skinRef.current.outlineColor, "#fff", "#ffb3d9"]);
+      musicRef.current?.stop();
     } else if (landed) {
       state.playerY = landY; state.playerVY = 0; state.isGrounded = true;
     } else if (state.playerY >= groundY - BS) {
@@ -733,14 +800,34 @@ export default function App() {
         onClick={handleTap}
         onTouchStart={(e) => {
           e.preventDefault();
-          if ((e.target as HTMLElement).closest("[data-edit-btn]")) return;
+          if ((e.target as HTMLElement).closest("[data-ui-btn]")) return;
           handleTap();
         }}
       >
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ display: "block" }} />
 
+        {/* Music toggle button */}
         <button
-          data-edit-btn="true"
+          data-ui-btn="true"
+          onClick={(e) => { e.stopPropagation(); toggleMuteRef.current(); }}
+          className="absolute flex items-center justify-center rounded-2xl font-bold"
+          style={{
+            bottom: 76, right: 16, width: 52, height: 52,
+            background: muted
+              ? "linear-gradient(135deg,#44224488,#66336688)"
+              : "linear-gradient(135deg,#ff9944cc,#ffcc44cc)",
+            border: muted ? "2px solid #884488" : "2px solid #ffcc44",
+            backdropFilter: "blur(8px)",
+            fontSize: 22, cursor: "pointer",
+            boxShadow: muted ? "none" : "0 4px 16px #ffcc4455",
+            zIndex: 10, color: "#fff",
+          }}
+          title={muted ? "Unmute music (M)" : "Mute music (M)"}
+        >{muted ? "🔇" : "🎵"}</button>
+
+        {/* Edit cube button */}
+        <button
+          data-ui-btn="true"
           onClick={(e) => { e.stopPropagation(); setShowEditor(true); }}
           className="absolute flex items-center justify-center rounded-2xl font-bold"
           style={{
