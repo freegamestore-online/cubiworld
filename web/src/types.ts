@@ -10,13 +10,25 @@ export interface BlockSkin {
   hat: "none" | "bow" | "crown" | "flower" | "star";
 }
 
-export interface Obstacle {
+// A single step tile (part of a staircase obstacle)
+export interface StepTile {
   x: number;
   y: number;
   width: number;
   height: number;
-  type: "spike" | "block" | "tall";
+}
+
+export interface Obstacle {
+  x: number;        // leftmost x of the whole obstacle group
+  y: number;        // top y of the first/tallest part
+  width: number;    // bounding width
+  height: number;   // bounding height
+  type: "spike" | "spike_group" | "steps";
   color: string;
+  // For spike_group: how many spikes side-by-side
+  spikeCount?: number;
+  // For steps: array of individual step tiles
+  steps?: StepTile[];
 }
 
 export interface Particle {
@@ -35,6 +47,7 @@ export interface GameState {
   playerY: number;
   playerVY: number;
   isGrounded: boolean;
+  groundedOnStep: boolean;
   score: number;
   distance: number;
   speed: number;
