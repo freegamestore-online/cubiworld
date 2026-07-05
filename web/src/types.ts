@@ -10,21 +10,16 @@ export interface BlockSkin {
   hat: "none" | "bow" | "crown" | "flower" | "star";
 }
 
-/** A single landable platform tile */
 export interface PlatformTile {
   x: number;
-  y: number;       // top surface y
+  y: number;
   width: number;
   height: number;
 }
 
-/**
- * A spike on the FLOOR (always pointing up).
- * Used for ground spikes under platforms and under staircase steps.
- */
 export interface FloorSpike {
   x: number;
-  y: number;       // top of spike (tip)
+  y: number;
   width: number;
   height: number;
   color: string;
@@ -35,18 +30,10 @@ export interface Obstacle {
   y: number;
   width: number;
   height: number;
-  /**
-   * spike       – single triangle spike on the ground
-   * spike_group – 2–3 spikes side-by-side on the ground
-   * platform    – raised flat platform to jump onto (floor spikes below)
-   * staircase   – separated ascending steps with floor spikes below each
-   */
   type: "spike" | "spike_group" | "platform" | "staircase";
   color: string;
   spikeCount?: number;
-  /** landable tiles */
   platforms?: PlatformTile[];
-  /** floor spikes (always on the ground, pointing up) */
   floorSpikes?: FloorSpike[];
 }
 
@@ -62,22 +49,32 @@ export interface Particle {
 }
 
 export interface GameState {
-  phase: "menu" | "playing" | "dead";
+  phase: "playing" | "dead" | "levelcomplete";
   playerY: number;
   playerVY: number;
   isGrounded: boolean;
   score: number;
-  level: number;
   distance: number;
   speed: number;
   obstacles: Obstacle[];
   particles: Particle[];
   groundTiles: { x: number; color: string }[];
   bgStars: { x: number; y: number; size: number; twinkle: number }[];
-  deathAnimTimer: number;
+  nextObstacleIn: number;
   flashTimer: number;
-  levelFlashTimer: number;   // flash when levelling up
+  deathAnimTimer: number;
+  finishLineX: number | null;
 }
+
+export interface RoundRecord {
+  level: number;
+  score: number;
+  completed: boolean;
+  date: string;
+}
+
+export const TOTAL_LEVELS = 6;
+export const FINISH_LINE_DISTANCE = 3000;
 
 export const DEFAULT_SKIN: BlockSkin = {
   bodyColor: "#ff9ec4",

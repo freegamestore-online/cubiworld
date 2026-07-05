@@ -1,44 +1,116 @@
 /**
- * Cozy warm background music — fully synthesized via Web Audio API.
- * Gentle pentatonic melody + soft pad chords + warm bass pulse.
- * Call start() to begin, stop() to end. Loops forever.
+ * CUBIworld — 6 synthesized level tracks via Web Audio API.
+ * Each level has a distinct BPM, scale, melody and vibe.
+ * Music stays fixed for the whole round.
  */
 
-// C major pentatonic: C D E G A  (and octave up)
-const PENTA = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99];
+const C_PENTA  = [261.63, 293.66, 329.63, 392.0,  440.0,  523.25, 587.33, 659.25];
+const A_MINOR  = [220.0,  261.63, 293.66, 329.63, 392.0,  440.0,  523.25, 587.33];
+const D_DORIAN = [293.66, 329.63, 349.23, 392.0,  440.0,  493.88, 523.25, 587.33];
+const EB_MAJOR = [311.13, 349.23, 392.0,  415.30, 466.16, 523.25, 587.33, 622.25];
+const F_LYDIAN = [349.23, 392.0,  440.0,  493.88, 523.25, 587.33, 659.25, 698.46];
+const G_PENTA  = [196.0,  220.0,  246.94, 293.66, 329.63, 392.0,  440.0,  493.88];
 
-// Warm chord roots (C, F, G, Am in Hz for root note)
-const CHORD_ROOTS = [261.63, 349.23, 392.0, 220.0];
-// Each chord: root, major 3rd, perfect 5th ratios
-const CHORD_RATIOS = [1, 1.25, 1.5];
+export interface TrackInfo {
+  name: string;
+  emoji: string;
+  description: string;
+  bgTop: string;
+  bgBottom: string;
+  groundColor: string;
+}
 
-const BPM = 88;
-const BEAT = 60 / BPM;       // seconds per beat
-const BAR  = BEAT * 4;       // 4/4 time
+interface TrackDef extends TrackInfo {
+  bpm: number;
+  scale: number[];
+  chordRoots: number[];
+  melodyPattern: number[];
+  chordPattern: number[];
+  bassPattern: number[];
+  waveType: OscillatorType;
+  padWave: OscillatorType;
+  masterVol: number;
+}
 
-export class CozyMusic {
+export const LEVEL_TRACKS: TrackDef[] = [
+  {
+    name: "Cozy Spring", emoji: "🌸", description: "Warm & gentle",
+    bgTop: "#ffe4f0", bgBottom: "#fff9e6", groundColor: "#c8f5c8",
+    bpm: 88, scale: C_PENTA,
+    chordRoots: [261.63, 349.23, 392.0, 220.0],
+    melodyPattern: [4,-1,3,2,4,-1,5,-1, 3,-1,2,1,3,-1,2,-1, 4,5,4,3,2,-1,4,-1, 5,-1,4,3,4,2,3,-1],
+    chordPattern: [0,0,1,2,0,3,1,2],
+    bassPattern: [0,-1,0,-1,2,-1,2,-1],
+    waveType: "sine", padWave: "triangle", masterVol: 0.38,
+  },
+  {
+    name: "Summer Breeze", emoji: "☀️", description: "Bright & bouncy",
+    bgTop: "#fff3b0", bgBottom: "#ffe0a0", groundColor: "#a8e6cf",
+    bpm: 104, scale: EB_MAJOR,
+    chordRoots: [311.13, 392.0, 349.23, 466.16],
+    melodyPattern: [5,-1,4,5,6,-1,5,4, 3,-1,4,3,2,-1,3,-1, 5,6,5,4,3,4,5,-1, 6,-1,5,4,5,3,4,-1],
+    chordPattern: [0,1,2,1,0,3,2,1],
+    bassPattern: [0,-1,2,-1,0,-1,3,-1],
+    waveType: "square", padWave: "sine", masterVol: 0.30,
+  },
+  {
+    name: "Midnight Jazz", emoji: "🌙", description: "Cool & smooth",
+    bgTop: "#1a1a3e", bgBottom: "#2d1b4e", groundColor: "#4a3060",
+    bpm: 76, scale: D_DORIAN,
+    chordRoots: [293.66, 261.63, 349.23, 392.0],
+    melodyPattern: [3,-1,-1,2,4,-1,3,-1, 2,1,-1,2,3,-1,1,-1, 4,-1,3,2,4,5,-1,4, 3,-1,2,1,2,-1,3,-1],
+    chordPattern: [0,0,1,2,3,0,1,2],
+    bassPattern: [0,-1,-1,0,2,-1,-1,2],
+    waveType: "triangle", padWave: "sine", masterVol: 0.35,
+  },
+  {
+    name: "Forest Walk", emoji: "🌿", description: "Earthy & calm",
+    bgTop: "#d4edda", bgBottom: "#c3e6cb", groundColor: "#6dbf67",
+    bpm: 80, scale: G_PENTA,
+    chordRoots: [196.0, 246.94, 293.66, 220.0],
+    melodyPattern: [2,-1,3,2,4,-1,3,-1, 5,-1,4,3,2,-1,3,-1, 4,3,2,1,2,-1,3,-1, 4,-1,5,4,3,2,1,-1],
+    chordPattern: [0,1,2,3,0,2,1,3],
+    bassPattern: [0,-1,0,-1,1,-1,1,-1],
+    waveType: "sine", padWave: "triangle", masterVol: 0.36,
+  },
+  {
+    name: "Neon City", emoji: "🏙️", description: "Electric & fast",
+    bgTop: "#0d0d2b", bgBottom: "#1a0533", groundColor: "#2d0b4e",
+    bpm: 118, scale: A_MINOR,
+    chordRoots: [220.0, 261.63, 293.66, 349.23],
+    melodyPattern: [5,4,-1,5,6,-1,5,4, 3,-1,4,5,4,3,-1,2, 5,-1,6,5,4,-1,5,-1, 6,5,4,3,4,5,6,-1],
+    chordPattern: [0,1,2,3,0,0,1,2],
+    bassPattern: [0,-1,0,0,2,-1,2,2],
+    waveType: "sawtooth", padWave: "square", masterVol: 0.28,
+  },
+  {
+    name: "Sky Kingdom", emoji: "☁️", description: "Dreamy & epic",
+    bgTop: "#b3d9ff", bgBottom: "#e8f4ff", groundColor: "#fff9c4",
+    bpm: 92, scale: F_LYDIAN,
+    chordRoots: [349.23, 440.0, 392.0, 523.25],
+    melodyPattern: [4,-1,5,4,6,-1,5,-1, 4,3,-1,4,5,-1,4,-1, 6,-1,5,4,5,6,7,-1, 6,-1,5,4,3,4,5,-1],
+    chordPattern: [0,1,2,3,0,1,2,0],
+    bassPattern: [0,-1,0,-1,2,-1,3,-1],
+    waveType: "sine", padWave: "triangle", masterVol: 0.36,
+  },
+];
+
+function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] as T; }
+
+export class LevelMusic {
   private ac: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private running = false;
-  private scheduleAhead = 0.15; // seconds
-  private schedulerTimer: ReturnType<typeof setInterval> | null = null;
-
-  // Sequencer state
+  private timer: ReturnType<typeof setInterval> | null = null;
   private beatIdx = 0;
   private nextBeatTime = 0;
-
-  // Melody pattern (indices into PENTA, -1 = rest)
-  private melodyPattern = [
-    4, -1, 3, 2, 4, -1, 5, -1,
-    3, -1, 2, 1, 3, -1, 2, -1,
-    4, 5, 4, 3, 2, -1, 4, -1,
-    5, -1, 4, 3, 4, 2, 3, -1,
-  ];
-
-  // Chord pattern (index into CHORD_ROOTS, one per bar)
-  private chordPattern = [0, 0, 1, 2, 0, 3, 1, 2];
   private chordIdx = 0;
   private barBeat = 0;
+  private track: TrackDef;
+
+  constructor(levelIndex: number) {
+    this.track = LEVEL_TRACKS[levelIndex % LEVEL_TRACKS.length] ?? LEVEL_TRACKS[0]!;
+  }
 
   private get ctx(): AudioContext {
     if (!this.ac) this.ac = new AudioContext();
@@ -51,206 +123,122 @@ export class CozyMusic {
     this.beatIdx = 0;
     this.chordIdx = 0;
     this.barBeat = 0;
-    this.nextBeatTime = this.ctx.currentTime + 0.05;
-
-    // Master gain (soft overall volume)
+    if (this.ctx.state === "suspended") this.ctx.resume();
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
-    this.masterGain.gain.linearRampToValueAtTime(0.55, this.ctx.currentTime + 1.5);
+    this.masterGain.gain.value = this.track.masterVol;
     this.masterGain.connect(this.ctx.destination);
-
-    this.schedulerTimer = setInterval(() => this.schedule(), 50);
+    this.nextBeatTime = this.ctx.currentTime + 0.05;
+    this.timer = setInterval(() => this.schedule(), 50);
   }
 
   stop() {
-    if (!this.running) return;
     this.running = false;
-    if (this.schedulerTimer !== null) { clearInterval(this.schedulerTimer); this.schedulerTimer = null; }
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
     if (this.masterGain) {
-      const now = this.ctx.currentTime;
-      this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
-      this.masterGain.gain.linearRampToValueAtTime(0, now + 0.8);
+      try { this.masterGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1); } catch { /* ignore */ }
     }
-  }
-
-  setVolume(v: number) {
-    if (!this.masterGain) return;
-    const now = this.ctx.currentTime;
-    this.masterGain.gain.cancelScheduledValues(now);
-    this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
-    this.masterGain.gain.linearRampToValueAtTime(v * 0.55, now + 0.3);
+    setTimeout(() => {
+      try { this.ac?.close(); } catch { /* ignore */ }
+      this.ac = null;
+      this.masterGain = null;
+    }, 400);
   }
 
   private schedule() {
     if (!this.running || !this.masterGain) return;
-    const ac = this.ctx;
-    const lookahead = ac.currentTime + this.scheduleAhead;
+    const t = this.track;
+    const beat = 60 / t.bpm;
+    const lookAhead = 0.15;
 
-    while (this.nextBeatTime < lookahead) {
-      this.scheduleBeat(this.nextBeatTime);
-      this.nextBeatTime += BEAT * 0.5; // schedule every half-beat
-    }
-  }
+    while (this.nextBeatTime < this.ctx.currentTime + lookAhead) {
+      const now = this.nextBeatTime;
 
-  private scheduleBeat(time: number) {
-    const ac = this.ctx;
-    const master = this.masterGain!;
-    const halfBeat = this.beatIdx % 2 === 0; // every half-beat, melody on even
-
-    // ── Melody (every half-beat) ──
-    const mIdx = this.melodyPattern[Math.floor(this.beatIdx / 2) % this.melodyPattern.length];
-    if (halfBeat && mIdx !== undefined && mIdx >= 0) {
-      const freq = PENTA[mIdx];
-      if (freq !== undefined) {
-        this.playNote(ac, master, freq, time, BEAT * 0.38, 0.18, "sine");
-        // Soft harmony a 5th above
-        this.playNote(ac, master, freq * 1.5, time, BEAT * 0.28, 0.06, "sine");
+      // Melody
+      const mIdx = this.beatIdx % t.melodyPattern.length;
+      const mNote = t.melodyPattern[mIdx] ?? -1;
+      if (mNote >= 0) {
+        const freq = t.scale[mNote] ?? t.scale[0]!;
+        this.playNote(freq, now, beat * 0.45, 0.22, t.waveType);
       }
-    }
 
-    // ── Chord pad (every bar = 8 half-beats) ──
-    if (this.beatIdx % 8 === 0) {
-      const rootHz = CHORD_ROOTS[this.chordPattern[this.chordIdx % this.chordPattern.length] ?? 0];
-      if (rootHz !== undefined) {
-        for (const ratio of CHORD_RATIOS) {
-          this.playPad(ac, master, rootHz * ratio, time, BAR * 0.92, 0.07);
-          this.playPad(ac, master, rootHz * ratio * 0.5, time, BAR * 0.92, 0.05); // sub octave warmth
+      // Bass (every 2 beats)
+      if (this.beatIdx % 2 === 0) {
+        const bIdx = (this.beatIdx / 2) % t.bassPattern.length;
+        const bNote = t.bassPattern[bIdx] ?? -1;
+        if (bNote >= 0) {
+          const freq = (t.scale[bNote] ?? t.scale[0]!) * 0.5;
+          this.playNote(freq, now, beat * 1.8, 0.18, t.waveType);
         }
       }
-      this.chordIdx++;
-      this.barBeat = 0;
-    }
-    this.barBeat++;
 
-    // ── Bass pulse (every beat = every 2 half-beats) ──
-    if (this.beatIdx % 2 === 0) {
-      const rootHz = CHORD_ROOTS[this.chordPattern[this.chordIdx % this.chordPattern.length] ?? 0];
-      if (rootHz !== undefined) {
-        const bassFreq = rootHz * 0.5; // one octave below chord root
-        this.playBass(ac, master, bassFreq, time, BEAT * 0.22, 0.14);
+      // Chord (every bar = 4 beats)
+      if (this.barBeat === 0) {
+        const cIdx = this.chordIdx % t.chordPattern.length;
+        const root = t.chordRoots[t.chordPattern[cIdx] ?? 0] ?? t.chordRoots[0]!;
+        [1, 1.25, 1.5].forEach(ratio => {
+          this.playPad(root * ratio, now, beat * 3.8, 0.08, t.padWave);
+        });
+        this.chordIdx++;
       }
+
+      // Hi-hat shimmer
+      if (this.beatIdx % 2 === 1) {
+        this.playHihat(now, beat * 0.12);
+      }
+
+      this.barBeat = (this.barBeat + 1) % 4;
+      this.beatIdx++;
+      this.nextBeatTime += beat;
     }
-
-    // ── Soft hi-hat shimmer (every half-beat, quieter on offbeats) ──
-    const hatVol = this.beatIdx % 2 === 0 ? 0.025 : 0.012;
-    this.playHat(ac, master, time, 0.04, hatVol);
-
-    // ── Kick on beats 1 and 3 ──
-    if (this.beatIdx % 4 === 0 || this.beatIdx % 4 === 4) {
-      this.playKick(ac, master, time, 0.12);
-    }
-
-    this.beatIdx++;
-    if (this.beatIdx >= this.melodyPattern.length * 2) this.beatIdx = 0;
   }
 
-  // Soft sine/triangle note with gentle attack/release
-  private playNote(
-    ac: AudioContext, dest: AudioNode,
-    freq: number, time: number, dur: number, gain: number,
-    type: OscillatorType,
-  ) {
-    const osc = ac.createOscillator();
-    const g   = ac.createGain();
-    // Warm low-pass filter
-    const filt = ac.createBiquadFilter();
-    filt.type = "lowpass"; filt.frequency.value = 1800; filt.Q.value = 0.5;
-
-    osc.type = type; osc.frequency.value = freq;
-    // Slight detune for warmth
-    osc.detune.value = rnd(-4, 4);
-
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(gain, time + 0.04);
-    g.gain.setValueAtTime(gain, time + dur * 0.6);
-    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
-
-    osc.connect(filt); filt.connect(g); g.connect(dest);
-    osc.start(time); osc.stop(time + dur + 0.05);
+  private playNote(freq: number, t: number, dur: number, vol: number, wave: OscillatorType) {
+    if (!this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = wave;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.01);
+    gain.gain.setTargetAtTime(0, t + dur * 0.6, dur * 0.15);
+    osc.connect(gain); gain.connect(this.masterGain);
+    osc.start(t); osc.stop(t + dur + 0.1);
   }
 
-  // Warm pad — triangle wave with slow attack
-  private playPad(
-    ac: AudioContext, dest: AudioNode,
-    freq: number, time: number, dur: number, gain: number,
-  ) {
-    const osc  = ac.createOscillator();
-    const g    = ac.createGain();
-    const filt = ac.createBiquadFilter();
-    filt.type = "lowpass"; filt.frequency.value = 900; filt.Q.value = 0.3;
-
-    osc.type = "triangle"; osc.frequency.value = freq;
-    osc.detune.value = rnd(-6, 6);
-
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(gain, time + 0.18);
-    g.gain.setValueAtTime(gain, time + dur * 0.7);
-    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
-
-    osc.connect(filt); filt.connect(g); g.connect(dest);
-    osc.start(time); osc.stop(time + dur + 0.05);
+  private playPad(freq: number, t: number, dur: number, vol: number, wave: OscillatorType) {
+    if (!this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = wave;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.08);
+    gain.gain.setTargetAtTime(0, t + dur * 0.7, dur * 0.2);
+    osc.connect(gain); gain.connect(this.masterGain);
+    osc.start(t); osc.stop(t + dur + 0.2);
   }
 
-  // Deep warm bass
-  private playBass(
-    ac: AudioContext, dest: AudioNode,
-    freq: number, time: number, dur: number, gain: number,
-  ) {
-    const osc  = ac.createOscillator();
-    const g    = ac.createGain();
-    const filt = ac.createBiquadFilter();
-    filt.type = "lowpass"; filt.frequency.value = 320; filt.Q.value = 0.8;
-
-    osc.type = "sine"; osc.frequency.value = freq;
-
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(gain, time + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
-
-    osc.connect(filt); filt.connect(g); g.connect(dest);
-    osc.start(time); osc.stop(time + dur + 0.05);
-  }
-
-  // Soft hi-hat (filtered white noise)
-  private playHat(
-    ac: AudioContext, dest: AudioNode,
-    time: number, dur: number, gain: number,
-  ) {
-    const buf  = ac.createBuffer(1, ac.sampleRate * dur, ac.sampleRate);
+  private playHihat(t: number, dur: number) {
+    if (!this.masterGain) return;
+    const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
     const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-
-    const src  = ac.createBufferSource();
-    const filt = ac.createBiquadFilter();
-    const g    = ac.createGain();
-    filt.type = "highpass"; filt.frequency.value = 7000;
-
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.15;
+    const src = this.ctx.createBufferSource();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "highpass"; filter.frequency.value = 8000;
     src.buffer = buf;
-    g.gain.setValueAtTime(gain, time);
-    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
-
-    src.connect(filt); filt.connect(g); g.connect(dest);
-    src.start(time); src.stop(time + dur + 0.01);
+    gain.gain.setValueAtTime(0.06, t);
+    gain.gain.setTargetAtTime(0, t + dur * 0.3, dur * 0.1);
+    src.connect(filter); filter.connect(gain); gain.connect(this.masterGain);
+    src.start(t);
   }
 
-  // Soft kick (sine sweep down)
-  private playKick(
-    ac: AudioContext, dest: AudioNode,
-    time: number, dur: number,
-  ) {
-    const osc = ac.createOscillator();
-    const g   = ac.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(110, time);
-    osc.frequency.exponentialRampToValueAtTime(45, time + dur);
+  static getTrackInfo(levelIndex: number): TrackInfo {
+    return LEVEL_TRACKS[levelIndex % LEVEL_TRACKS.length] ?? LEVEL_TRACKS[0]!;
+  }
 
-    g.gain.setValueAtTime(0.12, time);
-    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
-
-    osc.connect(g); g.connect(dest);
-    osc.start(time); osc.stop(time + dur + 0.01);
+  static pickRandom(arr: number[]): number {
+    return pick(arr);
   }
 }
-
-function rnd(a: number, b: number) { return a + Math.random() * (b - a); }
