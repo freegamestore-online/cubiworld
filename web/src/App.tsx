@@ -993,9 +993,13 @@ export default function App() {
       )}
 
       {/* ── GAME CANVAS ─────────────────────────────────────────────────── */}
+      {/* visibility (not display): the canvas must keep its layout size while
+          hidden — with display:none it measures 0×0, so the mount-time resize
+          set a 0×0 bitmap and the game drew onto an empty canvas (white screen
+          with only the DOM score ticking). */}
       <div
         className="absolute inset-0"
-        style={{ display: screen === "playing" ? "block" : "none" }}
+        style={{ visibility: screen === "playing" ? "visible" : "hidden" }}
         onClick={handleTap}
         onTouchStart={(e) => { e.preventDefault(); handleTap(); }}
       >
